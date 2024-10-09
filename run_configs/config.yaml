@@ -22,6 +22,11 @@ split:
 auxiliary_tasks:
   - type: 'clustering'
     params:
-      n_clusters: 7
+      hidden_channels: 16
+      output_dim: 7
       method: 'Kmeans'
-  - type: 'degree'
+      loss: CrossEntropyLoss
+  - type: 'degree_prediction'
+    params:
+      output_dim: 1
+      loss: MSELoss

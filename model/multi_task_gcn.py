@@ -22,10 +22,13 @@ class MultiTaskGCN(torch.nn.Module):
         self.classifier = GCNConv(self.hidden_channels, num_classes)
         # define the auxiliary head by aux_tasks
         self.cluster_head = None
+        self.auxiliary_tasks = {}
         for aux_task in aux_tasks:
             if aux_task.type == 'clustering':
-                # 定义聚类头，用于节点聚类任务
-                self.cluster_head = GCNConv(self.hidden_channels, aux_task.n_clusters)
+                self.auxiliary_tasks[aux_task.type] = GCNConv(self.hidden_channels, aux_task.output_dim)
+            elif aux_task.type == 'degree_prediction':
+                # TODO: Linear or GCN ? That's a question
+                self.auxiliary_tasks[aux_task.type] = GCNConv(self.hidden_channels, aux_task.output_dim)
 
     def forward(self, x, edge_index):
         # 前向传播过程
@@ -33,7 +36,9 @@ class MultiTaskGCN(torch.nn.Module):
         x = F.dropout(x, p=self.drop_rate, training=self.training)  # dropout正则化
         # x = F.relu(self.convs[1](x, edge_index))  # 第二层图卷积
         # 分类头的输出
-        node_classification = self.classifier(x, edge_index)
-        # 聚类头的输出
-        node_clustering = self.cluster_head(x, edge_index)
-        return node_classification, node_clustering
+        main_out = self.classifier(x, edge_index)
+        # the output of auxiliary tasks
+        auxiliary_out = {}
+        for task in self.auxiliary_tasks:
+            auxiliary_out[task] = self.auxiliary_tasks[task](x, edge_index)
+        return main_out, auxiliary_out

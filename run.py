@@ -9,6 +9,7 @@ from torch_geometric.datasets import Planetoid
 
 from auxiliary_tasks.auxiliary_config import add_auxiliary_task
 from auxiliary_tasks.clustering import ClusteringTask
+from auxiliary_tasks.degree_prediction import DegreePredictionTask
 from model.multi_task_gcn import MultiTaskGCN
 import yaml
 from utils.data_loader import load_data
@@ -27,14 +28,20 @@ def main():
         config = yaml.safe_load(f)
     # Load dataset
     data, dataset = load_data(config)
+
     # add auxiliary tasks
     aux_tasks = add_auxiliary_task(config)
     # generate the auxiliary labels
     aux_labels = None
+    node_degrees = None
     for task in aux_tasks:
         if isinstance(task, ClusteringTask):
             aux_labels = task.generate_aux_labels(data)
+        elif isinstance(task, DegreePredictionTask):
+            node_degrees = task.generate_node_degree(data)
     data.aux_labels = aux_labels
+    data.node_degrees = node_degrees
+
     # add model TODO: if we use meta-learning strategy, we may change it into the model array to get the model search space
     model = None
     if config['model']['name'] == 'gcn':
@@ -45,6 +52,7 @@ def main():
     acc = []
     alpha = 0.9
     optimizer = Adam(model.parameters(), lr=0.01)
+    # TODO: the loss of main task, maybe it need to change if the main task changes
     loss_fn = CrossEntropyLoss()
 
     # 训练模型
@@ -52,9 +60,17 @@ def main():
         model.train()
         optimizer.zero_grad()
         out = model(data.x, data.edge_index)
-        classification_loss = loss_fn(out[0][data.train_mask], data.y[data.train_mask])
-        clustering_loss = loss_fn(out[1], data.aux_labels)
-        loss = alpha * classification_loss + (1 - alpha) * clustering_loss
+        main_loss = loss_fn(out[0][data.train_mask], data.y[data.train_mask])
+        aux_loss = 0
+        for task in aux_tasks:
+            task_loss = 0
+            if task.type == 'clustering':
+                task_loss = task.loss_fn(out[1][task.type][data.train_mask], data.aux_labels[data.train_mask])
+            elif task.type == 'degree_prediction':
+                task_loss = task.loss_fn(out[1][task.type][data.train_mask], data.node_degrees[data.train_mask])
+            aux_loss += task_loss
+        # TODO: add the independent alpha for each aux task
+        loss = alpha * main_loss + (1 - alpha) * aux_loss
         loss.backward()
         optimizer.step()
 
